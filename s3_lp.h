@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,29 +7,66 @@
 #include <time.h>
 #include <unistd.h>
 
-typedef struct log_s {
-  char bucket_owner[64];
-  char bucket_name[64]; // Only lowercase letters, numbers, dots, and hyphens
-  char remote_ip[64];
-  char requester_id[64];
-  char request_id[64];
-  char operation[64];
-  char key[1024];
-  char request_uri[8192];
-  int http_status;
-  char err_code[32];
-  ssize_t bytes_sent;
-  ssize_t object_size;
-  time_t ms_ttime;
-  time_t ms_tatime;
-  char referer[64];
-  char user_agent[64];
-  char ver_id[64];
-  char host_id[64];
-  char auth_sig[16];
-  char cipher_suite[64];
-  char auth_type[64];
-  char host_header[64];
-  char TLS_ver[8];
-  struct tm time; // strftime format: [%d/%b/%Y:%H:%M:%S %z]
-} log_t;
+#define PASS_HASH 2000003
+#define LOG_SIZE 8192
+#define OPTIONS "f:h"
+#define BATCH_SIZE 10000
+
+typedef struct p_log_s {
+	char buffer[LOG_SIZE];
+	size_t length;
+
+	char *bucket_owner;
+	char *bucket_name; // Only lowercase letters, numbers, dots, and hyphens
+	struct tm time;	   // strftime format: [%d/%b/%Y:%H:%M:%S %z]
+
+	char *remote_ip;
+	char *requester_id;
+	char *request_id;
+
+	char *operation;
+	char *key;
+
+	char *request_uri;
+	char *err_code;
+
+	ssize_t bytes_sent;
+	ssize_t object_size;
+	time_t ms_ttime;
+	time_t ms_tatime;
+
+	char *referer;
+	char *user_agent;
+	char *ver_id;
+	char *host_id;
+
+	char *auth_sig;
+	char *cipher_suite;
+	char *auth_type;
+	char *host_header;
+	char *TLS_ver;
+	char *ARN_ap;
+} p_log_t;
+
+// Slimed down log struct - POST-PROCESSING
+// 25 bytes
+typedef struct s_log_s {
+	uint32_t timestamp;
+	uint32_t ip_hash;
+	uint16_t episode_id;
+	uint16_t podcast_id;
+	uint16_t bytes_sent_kb;
+	uint16_t object_size_kb;
+	uint16_t download_time_ms;
+	uint8_t status_code;
+	uint8_t platform_id;
+	uint8_t device_type;
+	uint8_t country_id;
+	uint8_t completion_percent;
+	uint8_t flags;
+} s_log_t;
+
+void process_log(FILE *log, FILE *output);
+void parse_log_entry(char *in_log, p_log_t *logs);
+void extract_log_entry(p_log_t *in_log, s_log_t *slim_log);
+void process_slim_logs(s_log_t *slim_log, int num_entrys, FILE *output);
