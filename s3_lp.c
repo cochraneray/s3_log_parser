@@ -4,19 +4,22 @@
 //
 #include "s3_lp.h"
 
+// static struct for holding hashed ip + key combinations
 static ip_track_t ip_track;
 
 int main(int argc, char *argv[]) {
-  char *filename = NULL;
-  char *output_file = NULL;
-  FILE *ifp = stdin; // default file path to stdin
-  FILE *ofp = stdout;
+  char *filename = NULL;    // default input filename
+  char *output_file = NULL; // default output filename
+  FILE *ifp = stdin;        // default file path to stdin
+  FILE *ofp = stdout;       // default file path to stdout
 
   // Initialize ip_hash struct
-  ip_track.capacity = IP_HASH;
-  ip_track.count = 0;
-  ip_track.ip_hashes = calloc(IP_HASH, sizeof(uint64_t));
-
+  {
+    ip_track.capacity = IP_HASH;
+    ip_track.count = 0;
+    ip_track.ip_hashes = calloc(IP_HASH, sizeof(uint64_t));
+  }
+  // Getopt scope - OPTIONS in header file
   {
     int opt = -1;
 
@@ -50,10 +53,11 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "USAGE: ./s3_lp -[options] -f <filepath>\n\tUse -h to "
                         "get help:\n\n\t./s3_lp -h");
         exit(EXIT_SUCCESS);
-      }
-    }
-  }
+      } // End of Switch
+    } // End of getopt while loop
+  } // end of getopt scope
 
+  // if filename was passed in, replace FILE*
   if (filename != NULL) {
     ifp = fopen(filename, "r");
     if (ifp == NULL) {
@@ -61,6 +65,8 @@ int main(int argc, char *argv[]) {
       exit(EXIT_FAILURE);
     }
   }
+
+  // if output filename was passed in, replace FILE*
   if (output_file != NULL) {
     ofp = fopen(output_file, "w");
     if (ofp == NULL) {
@@ -69,8 +75,10 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  // run log processing
   process_log(ifp, ofp);
 
+  // Free FILE* and struct
   free(ip_track.ip_hashes);
   fclose(ifp);
   fclose(ofp);
@@ -79,27 +87,37 @@ int main(int argc, char *argv[]) {
 
 // LOG PROCESSING DRIVER
 // -----------------------------------------------------------------------
+// process_log
+// Iniitalizes array of structs (up to batch size) to intake logs, process and
+// store When we reach BATCH SIZE we reset by processing the batch
 void process_log(FILE *log, FILE *output) {
   char log_entry[LOG_SIZE];
+  // Initialize batch_parsed_logs to hold BATCH SIZE addresses to p_log_t
   p_log_t *batch_parsed_logs = (p_log_t *)calloc(BATCH_SIZE, sizeof(p_log_t));
+  // Check not null
   if (batch_parsed_logs == NULL) {
     perror("Process Log: Malloc");
     exit(EXIT_FAILURE);
   }
+  // Initialize slim logs to hold the same amount of addresses
   s_log_t *batch_slim_logs = calloc(BATCH_SIZE, sizeof(s_log_t));
+  // Check not null
   if (batch_slim_logs == NULL) {
     perror("Process Log: Malloc");
     exit(EXIT_FAILURE);
   }
 
+  // Initiailze a total counter and batch counter
   int count = 0;
   int total_processed = 0;
 
+  // Process the logfile line by line
   while (fgets(log_entry, sizeof(log_entry), log)) {
     parse_log_entry(log_entry, &batch_parsed_logs[count]);
     extract_log_entry(&batch_parsed_logs[count], &batch_slim_logs[count]);
     ++count;
 
+    // Process batch when we've reached a critical point
     if (count >= BATCH_SIZE) {
       process_slim_logs(batch_slim_logs, count, output);
       total_processed += count;
