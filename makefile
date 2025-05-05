@@ -20,4 +20,4 @@ fake_logs.o: fake_logs.c
 .PHONY: clean
 
 clean:
-	rm -f *.o *.bin s3lp fake_logs
+	rm -f *.o *.bin *.log s3lp fake_logs
