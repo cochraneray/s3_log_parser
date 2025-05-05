@@ -9,10 +9,11 @@
 
 #define DJB2HASH 5381 // djb2 prime
 #define IP_HASH 12289 // nice prime number
-#define LOG_SIZE 8192
+#define LOG_SIZE 4096
 #define OPTIONS "f:o:h"
 #define BATCH_SIZE 10000
 #define MEGABYTE 1048576
+#define LOG_TERM '\n'
 
 #define PARSE_TIME_FAIL 3
 
@@ -35,8 +36,8 @@ typedef struct p_log_s {
   int http_code;
   char *err_code;
 
-  ssize_t bytes_sent;
-  ssize_t object_size;
+  size_t bytes_sent;
+  size_t object_size;
   time_t ms_ttime;
   time_t ms_tatime;
 
@@ -58,7 +59,6 @@ typedef struct p_log_s {
 } p_log_t;
 
 // Slimed down log struct - POST-PROCESSING
-// 25 bytes
 typedef struct s_log_s {
   uint32_t timestamp;         // mktime
   uint32_t ip_hash;           // remote_ip
@@ -70,7 +70,6 @@ typedef struct s_log_s {
   uint8_t status_code;        // http_code
   uint8_t system_id;          // user agent
   uint8_t platform_id;        // user agent
-  uint8_t country_id;         // remote_ip
   uint8_t completion_percent; // bytes_sent / object_size
   uint8_t flags;              // 8 Bit Flag for checking download progress
 } s_log_t;
@@ -82,30 +81,20 @@ typedef enum {
   SPOTIFY = 2,
   APPLE_PODCASTS = 3,
   GOOGLE_PODCASTS = 4,
-  OVERCAST = 5,
-  POCKET_CASTS = 6,
-  CASTRO = 7,
-  STITCHER = 8,
-  AMAZON_MUSIC = 9,
-  PODCAST_ADDICT = 10,
-  YOUTUBE = 11,
-  RSS_DIRECT = 12,
-  SOUNDCLOUD = 13,
-  CASTBOX = 14,
-  PLAYER_FM = 15,
-  WEB_PLAYER = 16
+  YOUTUBE = 5,
+  PLAYER_FM = 6,
+  WEB_PLAYER = 7
 } system_id_t;
 
 // bit value flags for device and OS
 typedef enum {
   DEV_UNKNOWN = 0,
-  DEV_DESKTOP = 1,
-  DEV_MOBILE = 2,
+  DEV_MOBILE = 1,
+  DEV_DESKTOP = 2,
   DEV_TABLET = 3,
   DEV_SMART_SPEAKER = 4,
-  DEV_AUTOMOTIVE = 5,
   DEV_TV = 6,
-  DEV_WEARABLE = 7,
+  DEV_WATCH = 7,
 
   // Bit Shift Left 8 Places
   OS_UNKNOWN = 0 << 8,
@@ -115,7 +104,7 @@ typedef enum {
   OS_MACOS = 4 << 8,
   OS_LINUX = 5 << 8,
   OS_CHROMECAST = 6 << 8,
-  OS_ROKU = 7 << 8,
+  OS_TVOS = 7 << 8,
   OS_WATCHOS = 8 << 8
 } platform_id_t;
 
@@ -129,8 +118,6 @@ typedef struct ip_track_s {
 void process_log(FILE *log, FILE *output);
 
 void parse_log_entry(char *in_log, p_log_t *full_log);
-inline int fast_atoi(const char *str);
-inline int64_t fast_atol(const char *str);
 
 // Extract Log and Send to Slim
 void extract_log_entry(p_log_t *full_log, s_log_t *slim_log);
@@ -145,3 +132,23 @@ int check_pattern(const char *check_str, const char *pattern);
 
 // Process Slim Logs
 void process_slim_logs(s_log_t *slim_log, int num_entrys, FILE *output);
+
+// Faster atoi conversion, less err checking overhead
+static inline int fast_atoi(const char *str) {
+  int val = 0;
+  while (*str >= '0' && *str <= '9') {
+    val = val * 10 + (*str - '0');
+    str++;
+  }
+  return val;
+}
+
+// Faster atoi conversion, for larger values like bytes_sent
+static inline int64_t fast_atol(const char *str) {
+  int64_t val = 0;
+  while (*str >= '0' && *str <= '9') {
+    val = val * 10 + (*str - '0');
+    str++;
+  }
+  return val;
+}

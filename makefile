@@ -1,15 +1,23 @@
 CC = gcc
-CCFLAGS = -g3 -Wall
+CCFLAGS = -g3 -Wall -Wextra -O1 -D_XOPEN_SOURCE
 
-all: pclf
+all: s3lp fake_logs
 
-pclf: pclf.o
-	$(CC) $(CCFLAGS) -o pclf pclf.o -lc
+s3lp: s3_lp.o
+	$(CC) $(CCFLAGS) -o s3lp s3_lp.o -lc
 
-pclf.o: pclf.c pclf.h
-	$(CC) $(CCFLAGS) -c pclf.c 
+s3_lp.o: s3_lp.c s3_lp.h
+	$(CC) $(CCFLAGS) -c s3_lp.c
+
+
+fake_logs: fake_logs.o
+	$(CC) $(CCFLAGS) -o fake_logs fake_logs.o
+
+fake_logs.o: fake_logs.c
+	$(CC) $(CCFLAGS) -c fake_logs.c
+
 
 .PHONY: clean
 
 clean:
-	rm -f *.o pclf
+	rm -f *.o *.bin s3lp fake_logs

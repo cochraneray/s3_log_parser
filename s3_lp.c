@@ -17,8 +17,6 @@ int main(int argc, char *argv[]) {
   ip_track.count = 0;
   ip_track.ip_hashes = calloc(IP_HASH, sizeof(uint64_t));
 
-  int err_flag = -1;
-
   {
     int opt = -1;
 
@@ -59,7 +57,14 @@ int main(int argc, char *argv[]) {
   if (filename != NULL) {
     ifp = fopen(filename, "r");
     if (ifp == NULL) {
-      perror("fopen");
+      perror("fopen intake");
+      exit(EXIT_FAILURE);
+    }
+  }
+  if (output_file != NULL) {
+    ofp = fopen(output_file, "w");
+    if (ofp == NULL) {
+      perror("fopen output");
       exit(EXIT_FAILURE);
     }
   }
@@ -76,10 +81,19 @@ int main(int argc, char *argv[]) {
 // -----------------------------------------------------------------------
 void process_log(FILE *log, FILE *output) {
   char log_entry[LOG_SIZE];
-  p_log_t *batch_parsed_logs = malloc(BATCH_SIZE * sizeof(p_log_t));
-  s_log_t *batch_slim_logs = malloc(BATCH_SIZE * sizeof(s_log_t));
+  p_log_t *batch_parsed_logs = (p_log_t *)calloc(BATCH_SIZE, sizeof(p_log_t));
+  if (batch_parsed_logs == NULL) {
+    perror("Process Log: Malloc");
+    exit(EXIT_FAILURE);
+  }
+  s_log_t *batch_slim_logs = calloc(BATCH_SIZE, sizeof(s_log_t));
+  if (batch_slim_logs == NULL) {
+    perror("Process Log: Malloc");
+    exit(EXIT_FAILURE);
+  }
 
   int count = 0;
+  int total_processed = 0;
 
   while (fgets(log_entry, sizeof(log_entry), log)) {
     parse_log_entry(log_entry, &batch_parsed_logs[count]);
@@ -88,12 +102,16 @@ void process_log(FILE *log, FILE *output) {
 
     if (count >= BATCH_SIZE) {
       process_slim_logs(batch_slim_logs, count, output);
+      total_processed += count;
+      count = 0;
     }
   }
 
   if (count > 0) {
     process_slim_logs(batch_slim_logs, count, output);
   }
+
+  fprintf(stderr, "%d Lines Processed", total_processed);
 
   free(batch_parsed_logs);
   free(batch_slim_logs);
@@ -107,11 +125,11 @@ void parse_log_entry(char *in_log, p_log_t *full_logs) {
   char *field = full_logs->buffer;
   int field_index = 0;
   int in_quote = 0;
-  int err_flags = 0;
+  int in_bracket = 0;
 
   // While source address isnt null (since fgets pulled until newline in process
   // log)
-  while (*source) {
+  while (*source && field_index <= 26) {
     // Quote Checker
     if (*source == '"') {
       in_quote = !in_quote;
@@ -119,8 +137,18 @@ void parse_log_entry(char *in_log, p_log_t *full_logs) {
       continue;
     }
 
+    if (*source == '[') {
+      in_bracket = 1;
+      *dest++ = *source++;
+      continue;
+    }
+    if (*source == ']') {
+      in_bracket = 0;
+      *dest++ = *source++;
+      continue;
+    }
     // Space Delimiter indicates new field
-    if (*source == ' ' && !in_quote) {
+    if (*source == ' ' && !in_quote && !in_bracket) {
       *dest++ =
           '\0'; // Set Dest address that holds space to \0 and post-increment
 
@@ -140,29 +168,26 @@ void parse_log_entry(char *in_log, p_log_t *full_logs) {
       // Time
       //[06/Feb/2019:00:00:38 +0000]
       case 2: {
-        char *close_bracket;
         char *strip_time;
         char time_buffer[32]; // allocate time buffer
         struct tm temp_time = {0};
-        // Read from after the first bracket '['
-        strncpy(time_buffer, field + 1,
-                sizeof(time_buffer)); // copy field into time buffer
-                                      // Find closing bracket if it exists
-        close_bracket = strchr(time_buffer, ']');
-        // Check if closing bracket in the buffer
-        if (close_bracket != NULL) {
-          *close_bracket = '\0';
-        }
-        // strip time and fille temp_time
-        strip_time = strptime(time_buffer, "%d/%b/%Y:%H:%M:%S %z", temp_time);
+        size_t i = 0;
 
+        const char *start = field + 1;
+        while (*start && *start != ']' && i < sizeof(time_buffer) - 1) {
+          time_buffer[i++] = *start++;
+        }
+        time_buffer[i] = '\0';
+        // strip time and fille temp_time
+
+        strip_time = strptime(time_buffer, "%d/%b/%Y:%H:%M:%S %z", &temp_time);
         // Check for success
         if (strip_time != NULL) {
           full_logs->time = temp_time;
         } else {
           // set time struct to 0, error
           memset(&full_logs->time, 0, sizeof(time));
-          fprintf(stderr, "Failed to set time for: %s", full_logs->bucket_name);
+          fprintf(stderr, "Failed to set time for: %d\n", field_index);
         }
       } break;
 
@@ -298,14 +323,16 @@ void parse_log_entry(char *in_log, p_log_t *full_logs) {
         break;
       case 25:
         full_logs->acl_required = field;
+        break;
       default:
         fprintf(stderr,
                 "Error, outside the acceptable bounds of this intake function");
       }
       field_index++; // When field is set we need to increment
       source++;      // Increment source separately
-      field =
-          dest; // Set field to dest current address (start of next log field)
+
+      // Set field to dest current address (start of next log field)
+      field = dest;
       continue;
     }
 
@@ -322,33 +349,17 @@ void parse_log_entry(char *in_log, p_log_t *full_logs) {
       field = dest;
       continue;
     }
-    *dest++ = *source++; // No space or ", set dest to source and post-increment
-                         // address
+
+    if (field_index > 26) {
+      break;
+    }
+    // No space or ", set dest to source and post-increment address
+    *dest++ = *source++;
   }
   *dest = '\0'; // set final address to null
   full_logs->length =
       dest -
       full_logs->buffer; // last memory address - first memory address = size
-}
-
-// Faster atoi conversion, less err checking overhead
-inline int fast_atoi(const char *str) {
-  int val = 0;
-  while (*str >= '0' && *str <= '9') {
-    val = val * 10 + (*str - '0');
-    str++;
-  }
-  return val;
-}
-
-// Faster atoi conversion, for larger values like bytes_sent
-inline int64_t fast_atol(const char *str) {
-  int64_t val = 0;
-  while (*str >= '0' && *str <= '9') {
-    val = val * 10 + (*str - '0');
-    str++;
-  }
-  return val;
 }
 
 // END - PARSE LOG LINE -> FULL LOG STRUCT ----------------------------
@@ -366,9 +377,10 @@ void extract_log_entry(p_log_t *full_log, s_log_t *slim_log) {
   slim_log->status_code = full_log->http_code;
   slim_log->system_id = extract_system(full_log->user_agent);
   slim_log->platform_id = extract_platform(full_log->user_agent);
-  slim_log->country_id = extract_location(full_log->remote_ip);
   slim_log->completion_percent =
-      (((full_log->bytes_sent / full_log->object_size) / 1024) * 100);
+      (full_log->object_size == 0)
+          ? 0
+          : (100 * full_log->bytes_sent) / full_log->object_size;
 
   // Only need to call set flags if its a multi-file DL
   if (slim_log->status_code == 206) {
@@ -381,17 +393,19 @@ void extract_log_entry(p_log_t *full_log, s_log_t *slim_log) {
 // DJB2 hashing method to organize podcasts
 uint32_t // /showname/#.mp3
 hash_podcast(const char *key) {
+  if (key == NULL || *key == '\0') {
+    return DJB2HASH;
+  }
   size_t key_len = strlen(key);
   char temp[key_len + 1];
-  char *source = key;
+  const char *source = key;
   char *dest = temp;
-  uint32_t podcast_hash = DJB2HASH;
 
   if (*source == '/') {
     source++;
   }
 
-  while (*source && *source != '/') {
+  while (*source && (*source != '/')) {
     *dest++ = *source++;
   }
   *dest = '\0';
@@ -400,6 +414,9 @@ hash_podcast(const char *key) {
 }
 
 uint32_t hash_key(const char *key) {
+  if (key == NULL)
+    return DJB2HASH;
+
   uint32_t hash = DJB2HASH;
   for (const char *ptr = key; *ptr != '\0'; ptr++) {
     hash = (((hash << 5) + hash) + *ptr);
@@ -419,41 +436,110 @@ uint8_t // "Spotify/8.8.4.669 Android/33 (SM-G781B)"
 extract_system(const char *user_agent) {
   if (check_pattern(user_agent, "RawVoice Generator/"))
     return BLUBRRY;
-  if (check_pattern(user_agent, "Spotify/"))
+  else if (check_pattern(user_agent, "Spotify/"))
     return SPOTIFY;
-  if (check_pattern(user_agent, "AppleCoreMedia/"))
+  else if (check_pattern(user_agent, "AppleCoreMedia/"))
     return APPLE_PODCASTS;
-  if (check_pattern(user_agent, "Googlebot"))
+  else if (check_pattern(user_agent, "Googlebot/"))
     return GOOGLE_PODCASTS;
-  if (check_pattern(user_agent, "FeedFetcher-Google"))
-    return GOOGLE_PODCASTS;
-  if (check_pattern(user_agent, "Youtube/"))
+  else if (check_pattern(user_agent, "Youtube/"))
     return YOUTUBE;
-  // Need generic one
+  else
+    return UNKNOWN;
 }
 
 uint8_t // "Spotify/8.8.4.669 Android/33 (SM-G781B)"
-extract_platform(const char *user_agent) {}
+extract_platform(const char *user_agent) {
+  uint16_t platform = DEV_UNKNOWN | OS_UNKNOWN;
 
-uint8_t extract_location(const char *location) {}
+  // Get device OS
+  // Android
+  if (check_pattern(user_agent, "Android")) {
+    platform = (platform & 0xFF) | OS_ANDROID;
+  }
+
+  // iOS
+  else if (check_pattern(user_agent, "iPhone") ||
+           check_pattern(user_agent, "iPad") ||
+           check_pattern(user_agent, "iOS")) {
+    platform = (platform & 0xFF) | OS_IOS;
+  }
+
+  // Windows
+  else if (check_pattern(user_agent, "Windows")) {
+    platform = (platform & 0xFF) | OS_IOS;
+  }
+
+  // Macintosh
+  else if (check_pattern(user_agent, "Macintosh") ||
+           check_pattern(user_agent, "Mac")) {
+    platform = (platform & 0xFF) | OS_MACOS;
+  }
+
+  // Linux
+  else if (check_pattern(user_agent, "tvOS")) {
+    platform = (platform & 0xFF) | OS_TVOS;
+  }
+
+  // Smart Watch
+  else if (check_pattern(user_agent, "watchOS")) {
+    platform = (platform & 0xFF) | OS_WATCHOS;
+  }
+
+  // Get device type
+  // Check Watch
+  if (platform & OS_WATCHOS) {
+    platform = (platform & 0xFF00) | DEV_WATCH;
+  }
+  // Check TV
+  else if (platform & OS_TVOS) {
+    platform = (platform & 0xFF00) | DEV_TV;
+  }
+  // Check Mobile
+  else if (check_pattern(user_agent, "Mobile") ||
+           (platform & OS_IOS && check_pattern(user_agent, "iPhone"))) {
+    platform = (platform & 0xFF00) | DEV_MOBILE;
+  }
+
+  // Check Tablet
+  else if (check_pattern(user_agent, "Tablet") ||
+           check_pattern(user_agent, "iPad")) {
+    platform = (platform & 0xFF00) | DEV_TABLET;
+  }
+
+  // Check Smart Speakers
+  else if (check_pattern(user_agent, "Echo") ||
+           check_pattern(user_agent, "HomePod") ||
+           check_pattern(user_agent, "GoogleHome")) {
+    platform = (platform & 0xFF00) | DEV_SMART_SPEAKER;
+  }
+
+  // Check Desktop
+  else if (platform & (OS_WINDOWS | OS_LINUX | OS_MACOS) &&
+           (check_pattern(user_agent, "Mobile") == 1)) {
+    platform = (platform & 0xFF00) | DEV_DESKTOP;
+  }
+
+  return platform;
+}
 
 // Using bitflags for efficiency, 8 bits to represent true false
 uint8_t set_flags(p_log_t *full_log, s_log_t *slim_log) {
   uint8_t flags = 0;
 
   if (full_log->byte_start == 0) {
-    flags = 0x02; // Set bit 00000010 to signify start of request
+    flags |= 0x02; // Set bit 00000010 to signify start of request
 
     // Check if ip is unique against ip_tracker
     if (0 == is_unique_ip(slim_log->ip_hash, slim_log->key_hash)) {
-      flags = 0x03; // Set bit 00000011
+      flags |= 0x03; // Set bit 00000011
     }
   }
   // Check if within a megabyte of the end of the file to guestimate end
   if (full_log->byte_end >= (full_log->object_size - MEGABYTE)) {
-    flags = 0x08; // Set bit 00001000 to signify end
+    flags |= 0x08; // Set bit 00001000 to signify end
   } else {
-    flags = 0x04; // Set bit 00000100 to signify mid-portion of file
+    flags |= 0x04; // Set bit 00000100 to signify mid-portion of file
   }
   return flags;
 }
@@ -493,24 +579,28 @@ int check_pattern(const char *check_str, const char *pattern) {
   // Search for first char, check rest for match
   for (size_t i = 0; check_str[i] != '\0'; i++) {
     if (check_str[i] == pattern[0]) {
-      int match = 0;
+      int match = 1;
       for (size_t j = 0; pattern[j] != '\0'; j++) {
         if (check_str[i + j] == '\0' || check_str[i + j] != pattern[j]) {
-          match = 1;
+          match = 0;
           break;
         }
       }
-      if (match == 0)
-        return 0;
+      if (match == 1)
+        return 1;
     }
   }
-  return 1;
+  return 0;
 }
 
 // END EXTRACT LOG FULL LOG -> SLIM LOG ------------------------------
 
 // PROCESS SLIM LOG -> OUTPUT FILE
-void process_slim_logs(s_log_t *slim_log, int num_entrys, FILE *output) {}
+void process_slim_logs(s_log_t *slim_log, int num_entries, FILE *output) {
+  for (int i = 0; i < num_entries; i++) {
+    fwrite(&slim_log[i], sizeof(s_log_t), 1, output);
+  }
+}
 
 // END PROCESS SLIM LOG -> OUTPUT
 // END LOG PROCESSING DRIVER
