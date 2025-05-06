@@ -8,111 +8,106 @@
 #include <unistd.h>
 
 #define DJB2HASH 5381 // djb2 prime
-#define IP_HASH 12289 // nice prime number
-#define LOG_SIZE 4096
-#define OPTIONS "f:o:h"
+#define IP_HASH 12289 // prime number near batch size
+#define LOG_DEFAULT 1024
+#define LOG_LARGE 2048
+#define OPTIONS "f:o:vt::h"
 #define BATCH_SIZE 10000
 #define MEGABYTE 1048576
-#define LOG_TERM '\n'
+
+#define BIN_FILE 1025
+#define CSV_FILE 1026
 
 #define PARSE_TIME_FAIL 3
 
 typedef struct p_log_s {
-  char buffer[LOG_SIZE];
-  size_t length;
+	char buffer[LOG_DEFAULT];
+	size_t length;
 
-  char *bucket_owner;
-  char *bucket_name; // Only lowercase letters, numbers, dots, and hyphens
-  struct tm time;    // strftime format: [%d/%b/%Y:%H:%M:%S %z]
+	char *bucket_owner;
+	char *bucket_name; // Only lowercase letters, numbers, dots, and hyphens
+	struct tm time;	   // strftime format: [%d/%b/%Y:%H:%M:%S %z]
 
-  char *remote_ip;
-  char *requester_id;
-  char *request_id;
+	char *remote_ip;
+	char *requester_id;
+	char *request_id;
 
-  char *operation;
-  char *key;
+	char *operation;
+	char *key;
 
-  char *request_uri;
-  int http_code;
-  char *err_code;
+	char *request_uri;
+	int http_code;
+	char *err_code;
 
-  size_t bytes_sent;
-  size_t object_size;
-  time_t ms_ttime;
-  time_t ms_tatime;
+	size_t bytes_sent;
+	size_t object_size;
+	time_t ms_ttime;
+	time_t ms_tatime;
 
-  char *referer;
-  char *user_agent;
-  char *ver_id;
-  char *host_id;
+	char *referer;
+	char *user_agent;
+	char *ver_id;
+	char *host_id;
 
-  char *auth_sig;
-  char *cipher_suite;
-  char *auth_type;
-  char *host_header;
-  char *TLS_ver;
-  char *ARN_ap;
-  char *acl_required;
-  char *range_get;
-  size_t byte_start;
-  size_t byte_end;
+	char *auth_sig;
+	char *cipher_suite;
+	char *auth_type;
+	char *host_header;
+	char *TLS_ver;
+	char *ARN_ap;
+	char *acl_required;
+	char *range_get;
+	size_t byte_start;
+	size_t byte_end;
 } p_log_t;
 
 // Slimed down log struct - POST-PROCESSING
+// 28 byte struct :D
 typedef struct s_log_s {
-  uint32_t timestamp;         // mktime
-  uint32_t ip_hash;           // remote_ip
-  uint32_t podcast_hash;      // key
-  uint32_t key_hash;          // key
-  uint16_t bytes_sent_kb;     // bytes_sent / 1024
-  uint16_t object_size_kb;    // object_size
-  uint16_t download_time_ms;  // ms_ttime
-  uint8_t status_code;        // http_code
-  uint8_t system_id;          // user agent
-  uint8_t platform_id;        // user agent
-  uint8_t completion_percent; // bytes_sent / object_size
-  uint8_t flags;              // 8 Bit Flag for checking download progress
+	uint32_t timestamp;			// mktime
+	uint32_t ip_hash;			// remote_ip
+	uint32_t podcast_hash;		// key
+	uint32_t key_hash;			// key
+	uint16_t bytes_sent_kb;		// bytes_sent / 1024
+	uint16_t object_size_kb;	// object_size
+	uint16_t download_time_ms;	// ms_ttime
+	uint8_t status_code;		// http_code
+	uint8_t system_id;			// user agent
+	uint8_t platform_id;		// user agent
+	uint8_t completion_percent; // bytes_sent / object_size
+	uint8_t flags;				// 8 Bit Flag for checking download progress
 } s_log_t;
 
 // Enum Codes for System ID and Platform ID
-typedef enum {
-  UNKNOWN = 0,
-  BLUBRRY = 1,
-  SPOTIFY = 2,
-  APPLE_PODCASTS = 3,
-  GOOGLE_PODCASTS = 4,
-  YOUTUBE = 5,
-  PLAYER_FM = 6,
-  WEB_PLAYER = 7
-} system_id_t;
+typedef enum { UNKNOWN = 0, BLUBRRY = 1, SPOTIFY = 2, APPLE_PODCASTS = 3, GOOGLE_PODCASTS = 4, YOUTUBE = 5, PLAYER_FM = 6, WEB_PLAYER = 7 } system_id_t;
 
 // bit value flags for device and OS
 typedef enum {
-  DEV_UNKNOWN = 0,
-  DEV_MOBILE = 1,
-  DEV_DESKTOP = 2,
-  DEV_TABLET = 3,
-  DEV_SMART_SPEAKER = 4,
-  DEV_TV = 6,
-  DEV_WATCH = 7,
+	DEV_UNKNOWN = 0,
+	DEV_MOBILE = 1,
+	DEV_DESKTOP = 2,
+	DEV_TABLET = 3,
+	DEV_SMART_SPEAKER = 4,
+	DEV_TV = 5,
+	DEV_WATCH = 6,
 
-  // Bit Shift Left 8 Places
-  OS_UNKNOWN = 0 << 8,
-  OS_ANDROID = 1 << 8,
-  OS_IOS = 2 << 8,
-  OS_WINDOWS = 3 << 8,
-  OS_MACOS = 4 << 8,
-  OS_LINUX = 5 << 8,
-  OS_CHROMECAST = 6 << 8,
-  OS_TVOS = 7 << 8,
-  OS_WATCHOS = 8 << 8
+	// Bit Shift Left 8 Places
+	OS_UNKNOWN = 0 << 8,
+	OS_ANDROID = 1 << 8,
+	OS_IOS = 2 << 8,
+	OS_WINDOWS = 3 << 8,
+	OS_MACOS = 4 << 8,
+	OS_LINUX = 5 << 8,
+	OS_CHROMECAST = 6 << 8,
+	OS_TV = 7 << 8,
+	OS_WATCH = 8 << 8
 } platform_id_t;
 
 // Unique IP Address manager, uses Hash Table
 typedef struct ip_track_s {
-  uint64_t *ip_hashes;
-  size_t count;
-  size_t capacity;
+	uint64_t *ip_hashes;
+	size_t count;
+	size_t capacity;
 } ip_track_t;
 
 void process_log(FILE *log, FILE *output);
@@ -134,21 +129,25 @@ int check_pattern(const char *check_str, const char *pattern);
 void process_slim_logs(s_log_t *slim_log, int num_entrys, FILE *output);
 
 // Faster atoi conversion, less err checking overhead
-static inline int fast_atoi(const char *str) {
-  int val = 0;
-  while (*str >= '0' && *str <= '9') {
-    val = val * 10 + (*str - '0');
-    str++;
-  }
-  return val;
+static inline int
+fast_atoi(const char *str)
+{
+	int val = 0;
+	while (*str >= '0' && *str <= '9') {
+		val = val * 10 + (*str - '0');
+		str++;
+	}
+	return val;
 }
 
 // Faster atoi conversion, for larger values like bytes_sent
-static inline int64_t fast_atol(const char *str) {
-  int64_t val = 0;
-  while (*str >= '0' && *str <= '9') {
-    val = val * 10 + (*str - '0');
-    str++;
-  }
-  return val;
+static inline int64_t
+fast_atol(const char *str)
+{
+	int64_t val = 0;
+	while (*str >= '0' && *str <= '9') {
+		val = val * 10 + (*str - '0');
+		str++;
+	}
+	return val;
 }
