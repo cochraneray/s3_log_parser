@@ -20,6 +20,7 @@ extern "C" {
 #define OPTIONS "f:o:vt::h"
 #define BATCH_SIZE 10000
 #define MEGABYTE 1048576
+#define fsize_KB 1000
 
 #define BIN_FILE 1025
 #define CSV_FILE 1026
@@ -77,7 +78,7 @@ typedef struct s_log_s {
 	uint16_t bytes_sent_kb;		// bytes_sent / 1024
 	uint16_t object_size_kb;	// object_size
 	uint16_t download_time_ms;	// ms_ttime
-	uint8_t status_code;		// http_code
+	uint8_t http_code;			// http_code
 	uint8_t system_id;			// user agent
 	uint8_t platform_id;		// user agent
 	uint8_t completion_percent; // bytes_sent / object_size
@@ -85,7 +86,16 @@ typedef struct s_log_s {
 } s_log_t;
 
 // Enum Codes for System ID and Platform ID
-typedef enum { UNKNOWN = 0, BLUBRRY = 1, SPOTIFY = 2, APPLE_PODCASTS = 3, GOOGLE_PODCASTS = 4, YOUTUBE = 5, PLAYER_FM = 6, WEB_PLAYER = 7 } system_id_t;
+typedef enum {
+	UNKNOWN = 0,
+	BLUBRRY = 1,
+	SPOTIFY = 2,
+	APPLE_PODCASTS = 3,
+	GOOGLE_PODCASTS = 4,
+	YOUTUBE = 5,
+	PLAYER_FM = 6,
+	WEB_PLAYER = 7
+} system_id_t;
 
 // bit value flags for device and OS
 typedef enum {
@@ -109,6 +119,14 @@ typedef enum {
 	OS_WATCH = 8 << 8
 } platform_id_t;
 
+typedef enum { //
+	DEFAULT = 0,
+	UNIQUE_IP = 1,
+	STRT_206DL = 2,
+	MID_206DL = 4,
+	END_206DL = 8
+} http_flag_t;
+
 // Unique IP Address manager, uses Hash Table
 typedef struct ip_track_s {
 	uint64_t *ip_hashes;
@@ -125,7 +143,7 @@ typedef struct s_context_s {
 
 //// Function Prototypes
 //
-void process_log(FILE *log, FILE *output, s_context_t *context);
+int process_log(FILE *log, FILE *output, s_context_t *context);
 void parse_log_entry(char *in_log, p_log_t *full_log, s_context_t *context);
 
 // Extract Log and Send to Slim
@@ -136,7 +154,14 @@ uint8_t extract_system(const char *device);
 uint8_t extract_platform(const char *user_agent);
 uint8_t extract_location(const char *location);
 uint8_t set_flags(p_log_t *full_log, s_log_t *slim_log, s_context_t *context);
+
+// Might want another wrapper around is_unique_ip that updates a analytics struct
+// Would probably want is_unique_ip to instead return the address where it was placed / found
+// Instead of having the hash there, we have a struct that has counts, manages the opener download
+// and closer download requests as 1 unique entity with bit flags
 int is_unique_ip(uint32_t ip_hash, uint32_t key_hash, s_context_t *context);
+//
+//
 int check_pattern(const char *check_str, const char *pattern);
 
 // Process Slim Logs

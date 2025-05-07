@@ -4,23 +4,27 @@
 // process_log
 // Iniitalizes array of structs (up to batch size) to intake logs, process and
 // store When we reach BATCH SIZE we reset by processing the batch
-void
+int
 process_log(FILE *log, FILE *output, s_context_t *context)
 {
 	char log_entry[LOG_DEFAULT];
 	// Initialize batch_parsed_logs to hold BATCH SIZE addresses to p_log_t
 	p_log_t *batch_parsed_logs = (p_log_t *)calloc(BATCH_SIZE, sizeof(p_log_t));
+
+	// Exiting here was causing seg fault due to ip_tracker
 	// Check not null
 	if (batch_parsed_logs == NULL) {
 		perror("Process Log: Malloc");
-		exit(EXIT_FAILURE);
+		return 1;
 	}
 	// Initialize slim logs to hold the same amount of addresses
 	s_log_t *batch_slim_logs = (s_log_t *)calloc(BATCH_SIZE, sizeof(s_log_t));
+
+	// exiting here was causing seg fault due to ip_tracker
 	// Check not null
 	if (batch_slim_logs == NULL) {
 		perror("Process Log: Malloc");
-		exit(EXIT_FAILURE);
+		return 1;
 	}
 
 	// Initiailze a total counter and batch counter
@@ -34,6 +38,7 @@ process_log(FILE *log, FILE *output, s_context_t *context)
 		++count;
 
 		// Process batch when we've reached a critical point
+		// Pre-Processing sucessful -> Empty into output file
 		if (count >= BATCH_SIZE) {
 			process_slim_logs(batch_slim_logs, count, output, context);
 			total_processed += count;
@@ -41,14 +46,18 @@ process_log(FILE *log, FILE *output, s_context_t *context)
 		}
 	}
 
+
+	// Pre-Processing Sucessful -> Empty into output file
 	if (count > 0) {
 		process_slim_logs(batch_slim_logs, count, output, context);
 	}
+	// Check verbose flag
 	if (context->verbose) {
 		fprintf(stderr, "%d Lines Processed", total_processed);
 	}
 	free(batch_parsed_logs);
 	free(batch_slim_logs);
+	return 0;
 }
 
 // PARSE LOG LINE -> FULL LOG STRUCT
@@ -302,12 +311,7 @@ parse_log_entry(char *in_log, p_log_t *full_logs, s_context_t *context)
 	*dest = '\0';								  // set final address to null
 	full_logs->length = dest - full_logs->buffer; // last memory address - first memory address = size
 	if (context->verbose) {
-		time_t t;
-		struct tm *local_time;
-		t = time(NULL);
-		local_time = localtime(&t);
-		fprintf(stderr, "Log->Struct:[%02d:%02d:%02d] %s %s FieldInd:%d http:%d\n", local_time->tm_hour, local_time->tm_min, local_time->tm_sec, full_logs->bucket_name,
-				full_logs->key, field_index, full_logs->http_code);
+		fprintf(stderr, "Log->Struct:%s %s FieldInd:%d http:%d\n", full_logs->bucket_name, full_logs->key, field_index, full_logs->http_code);
 	}
 }
 
@@ -325,18 +329,14 @@ extract_log_entry(p_log_t *full_log, s_log_t *slim_log, s_context_t *context)
 	slim_log->bytes_sent_kb = (full_log->bytes_sent / 1024);
 	slim_log->object_size_kb = (full_log->object_size / 1024);
 	slim_log->download_time_ms = full_log->ms_ttime;
-	slim_log->status_code = full_log->http_code;
+	slim_log->http_code = full_log->http_code;
 	slim_log->system_id = extract_system(full_log->user_agent);
 	slim_log->platform_id = extract_platform(full_log->user_agent);
 	slim_log->completion_percent = (full_log->object_size == 0) ? 0 : (100 * full_log->bytes_sent) / full_log->object_size;
 
 	// Only need to call set flags if its a multi-file DL
-	if (slim_log->status_code == 206) {
-		slim_log->flags = set_flags(full_log, slim_log, context);
-	}
-	else {
-		slim_log->flags = 0;
-	}
+	slim_log->flags = set_flags(full_log, slim_log, context);
+
 	if (context->verbose) {
 		time_t t;
 		struct tm *local_time;
@@ -483,26 +483,44 @@ extract_platform(const char *user_agent)
 }
 
 // Using bitflags for true false like file permissions, 8 bits to represent true false for different conditions
+// Checks htpp_code to change how it interacts with flags, only have multi-request downloads currently
+//
 // Should probably swap this into an enum for clarity
 uint8_t
 set_flags(p_log_t *full_log, s_log_t *slim_log, s_context_t *context)
 {
 	uint8_t flags = 0;
+	http_flag_t http_flag = DEFAULT;
+	size_t end_check = MEGABYTE;
+	// 206 indicates multi-request for downloads, flag system allows us to avoid
+	// counting the same ip several times
+	if (slim_log->http_code == 206) {
+		if (full_log->byte_start == 0) {
+			flags |= STRT_206DL; // Set bit 00000010 to signify start of request
 
-	if (full_log->byte_start == 0) {
-		flags |= 0x02; // Set bit 00000010 to signify start of request
+			// Check if ip is unique against ip_tracker
+			// Might want another wrapper around is_unique_ip that updates a analytics struct
+			if (1 == is_unique_ip(slim_log->ip_hash, slim_log->key_hash, context)) {
+				flags |= UNIQUE_IP; // Set bit 00000011
+			}
+		}
+		// Reduce End of file checker if total size is less than 1mb
+		if (full_log->object_size < end_check) {
+			end_check = fsize_KB;
+		}
 
-		// Check if ip is unique against ip_tracker
-		if (0 == is_unique_ip(slim_log->ip_hash, slim_log->key_hash, context)) {
-			flags |= 0x03; // Set bit 00000011
+		// Check if within a megabyte of the end of the file to guestimate end
+		if (full_log->byte_end >= (full_log->object_size - end_check)) {
+			flags = END_206DL; // Set bit 00001000 to signify end
+		}
+		else if (flags == 0) {
+			flags = MID_206DL; // Set bit 00000100 to signify mid-portion of file
 		}
 	}
-	// Check if within a megabyte of the end of the file to guestimate end
-	if (full_log->byte_end >= (full_log->object_size - MEGABYTE)) {
-		flags |= 0x08; // Set bit 00001000 to signify end
-	}
-	else {
-		flags |= 0x04; // Set bit 00000100 to signify mid-portion of file
+
+
+	if (context->verbose == 1) {
+		fprintf(stderr, "%u: Flag Set\n", slim_log->key_hash);
 	}
 	return flags;
 }
@@ -510,7 +528,6 @@ set_flags(p_log_t *full_log, s_log_t *slim_log, s_context_t *context)
 int
 is_unique_ip(uint32_t ip_hash, uint32_t key_hash, s_context_t *context)
 {
-	int flag = 0;
 	// Combine ip hash and key hash to generate unique id
 	uint64_t complete_hash = (((uint64_t)ip_hash << 32) | key_hash);
 
@@ -518,7 +535,9 @@ is_unique_ip(uint32_t ip_hash, uint32_t key_hash, s_context_t *context)
 	if (complete_hash == 0) {
 		complete_hash = 1;
 	}
-	uint32_t index = complete_hash % IP_HASH;
+
+	// Normalize that Hash to be within index range
+	uint32_t index = complete_hash % context->ip_track.capacity; // Capacity is Hashing value
 	uint32_t original_index = index;
 
 	do {
@@ -526,17 +545,17 @@ is_unique_ip(uint32_t ip_hash, uint32_t key_hash, s_context_t *context)
 		if ((context->ip_track.ip_hashes[index]) == 0) {
 			context->ip_track.ip_hashes[index] = complete_hash;
 			context->ip_track.count += 1;
-			return 0;
+			return 1;
 		}
 		// Already recorded, skip
 		if (context->ip_track.ip_hashes[index] == complete_hash) {
-			return 1;
+			return 0;
 		}
 		// Try next index, if index was miraculously IP_HASH we return back to 0
 		// then 1
 		index = (index + 1) % IP_HASH;
 	} while (index != original_index);
-	return flag;
+	return 0;
 }
 
 // Pattern Matching using char checker for flag matching
@@ -546,18 +565,18 @@ check_pattern(const char *check_str, const char *pattern)
 	// Search for first char, check rest for match
 	for (size_t i = 0; check_str[i] != '\0'; i++) {
 		if (check_str[i] == pattern[0]) {
-			int match = 1;
+			int match = 1; // Matches
 			for (size_t j = 0; pattern[j] != '\0'; j++) {
 				if (check_str[i + j] == '\0' || check_str[i + j] != pattern[j]) {
-					match = 0;
+					match = 0; // No Match
 					break;
 				}
 			}
-			if (match == 1)
+			if (match == 1) // Matches
 				return 1;
 		}
 	}
-	return 0;
+	return 0; // No Match
 }
 
 // END EXTRACT LOG FULL LOG -> SLIM LOG ------------------------------
@@ -588,7 +607,7 @@ output_CSV(s_log_t *slim_log, int num_entries, FILE *output, s_context_t *contex
 
 	for (int i = 0; i < num_entries; i++) {
 		fprintf(output, "%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n", slim_log->timestamp, slim_log->ip_hash, slim_log->podcast_hash, slim_log->key_hash, slim_log->bytes_sent_kb,
-				slim_log->object_size_kb, slim_log->download_time_ms, slim_log->status_code, slim_log->system_id, slim_log->platform_id, slim_log->completion_percent,
+				slim_log->object_size_kb, slim_log->download_time_ms, slim_log->http_code, slim_log->system_id, slim_log->platform_id, slim_log->completion_percent,
 				slim_log->flags);
 	}
 	if (context->verbose) {
