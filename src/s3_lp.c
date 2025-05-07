@@ -2,7 +2,7 @@
 //
 //
 //
-#include "s3_lp.h"
+#include "../include/s3_lp.h"
 
 // static struct for holding hashed ip + key combinations
 static ip_track_t ip_track;
@@ -16,13 +16,15 @@ main(int argc, char *argv[])
 	char *output_file = NULL; // default output filename
 	FILE *ifp = stdin;		  // default file path to stdin
 	FILE *ofp = stdout;		  // default file path to stdout
+	int err_flag = 0;
 
 
 	// Initialize ip_hash struct
 	{
 		ip_track.capacity = IP_HASH;
 		ip_track.count = 0;
-		ip_track.ip_hashes = calloc(IP_HASH, sizeof(uint64_t));
+		// GTest uses cpp which requires explicit cast
+		ip_track.ip_hashes = (uint64_t *)calloc(IP_HASH, sizeof(uint64_t));
 	}
 	// Getopt scope - OPTIONS in header file
 	{
@@ -34,7 +36,7 @@ main(int argc, char *argv[])
 			case 'f': {
 				if (optarg == 0) {
 					fprintf(stderr, "-f requires a filename to parse, defaults to stdin");
-					exit(EXIT_FAILURE);
+					err_flag = 1;
 				}
 				filename = optarg;
 				break;
@@ -43,7 +45,7 @@ main(int argc, char *argv[])
 			case 'o': {
 				if (optarg == 0) {
 					fprintf(stderr, "-o requires an output filename, defaults to stdout");
-					exit(EXIT_FAILURE);
+					err_flag = 1;
 				}
 				output_file = optarg;
 				break;
@@ -72,22 +74,27 @@ main(int argc, char *argv[])
 								"\t-v verbose output\n"
 								"\t-t file type: (b)in, (c)sv" // pgsql db insert query?
 								"\t-h display options\n");
-				exit(EXIT_SUCCESS);
+				err_flag = 1;
+				break;
 			}
 			default:
 				fprintf(stderr, "USAGE: ./s3_lp -[options] -f <filepath>\n\tUse -h to "
 								"get help:\n\n\t./s3_lp -h");
-				exit(EXIT_SUCCESS);
+				err_flag = 1;
 			} // End of Switch
-		} // End of getopt while loop
+		} // iEnd of getopt while loop
 	} // end of getopt scope
 
+	if (err_flag == 1) {
+		free(ip_track.ip_hashes);
+		exit(EXIT_FAILURE);
+	}
 	// if filename was passed in, replace FILE*
 	if (filename != NULL) {
 		ifp = fopen(filename, "r");
 		if (ifp == NULL) {
 			perror("fopen intake");
-			exit(EXIT_FAILURE);
+			err_flag = 1;
 		}
 	}
 
@@ -96,10 +103,14 @@ main(int argc, char *argv[])
 		ofp = fopen(output_file, "w");
 		if (ofp == NULL) {
 			perror("fopen output");
-			exit(EXIT_FAILURE);
+			err_flag = 1;
 		}
 	}
 
+	if (err_flag == 1) {
+		free(ip_track.ip_hashes);
+		exit(EXIT_FAILURE);
+	}
 	// run log processing
 	process_log(ifp, ofp);
 
@@ -126,7 +137,7 @@ process_log(FILE *log, FILE *output)
 		exit(EXIT_FAILURE);
 	}
 	// Initialize slim logs to hold the same amount of addresses
-	s_log_t *batch_slim_logs = calloc(BATCH_SIZE, sizeof(s_log_t));
+	s_log_t *batch_slim_logs = (s_log_t *)calloc(BATCH_SIZE, sizeof(s_log_t));
 	// Check not null
 	if (batch_slim_logs == NULL) {
 		perror("Process Log: Malloc");
@@ -240,7 +251,7 @@ parse_log_entry(char *in_log, p_log_t *full_logs)
 				}
 				else {
 					// set time struct to 0, error
-					memset(&full_logs->time, 0, sizeof(time));
+					memset(&full_logs->time, 0, sizeof(full_logs->time));
 					fprintf(stderr, "Failed to set time for: %d\n", field_index);
 				}
 			} break;
@@ -676,8 +687,30 @@ check_pattern(const char *check_str, const char *pattern)
 void
 process_slim_logs(s_log_t *slim_log, int num_entries, FILE *output)
 {
+	if (output_filetype_flag == CSV_FILE) {
+		output_CSV(slim_log, num_entries, output);
+	}
+	else {
+		for (int i = 0; i < num_entries; i++) {
+			fwrite(&slim_log[i], sizeof(s_log_t), 1, output);
+		}
+		if (verbose_flag) {
+			fprintf(stderr, "Batch Extracted\n");
+		}
+	}
+}
+
+void
+output_CSV(s_log_t *slim_log, int num_entries, FILE *output)
+{
+	fprintf(output, "timestamp,ip_hash,podcast_hash,key_hash"
+					",bytes_sent_kb,object_size_kb,download_time_ms,"
+					"status_code,system_id,platform-id,completion_percent,flags\n");
+
 	for (int i = 0; i < num_entries; i++) {
-		fwrite(&slim_log[i], sizeof(s_log_t), 1, output);
+		fprintf(output, "%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n", slim_log->timestamp, slim_log->ip_hash, slim_log->podcast_hash, slim_log->key_hash, slim_log->bytes_sent_kb,
+				slim_log->object_size_kb, slim_log->download_time_ms, slim_log->status_code, slim_log->system_id, slim_log->platform_id, slim_log->completion_percent,
+				slim_log->flags);
 	}
 	if (verbose_flag) {
 		fprintf(stderr, "Batch Extracted\n");

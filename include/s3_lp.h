@@ -1,3 +1,10 @@
+#ifndef S3_LP_H
+#define S3_LP_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,7 +17,6 @@
 #define DJB2HASH 5381 // djb2 prime
 #define IP_HASH 12289 // prime number near batch size
 #define LOG_DEFAULT 1024
-#define LOG_LARGE 2048
 #define OPTIONS "f:o:vt::h"
 #define BATCH_SIZE 10000
 #define MEGABYTE 1048576
@@ -126,7 +132,8 @@ int is_unique_ip(uint32_t ip_hash, uint32_t key_hash);
 int check_pattern(const char *check_str, const char *pattern);
 
 // Process Slim Logs
-void process_slim_logs(s_log_t *slim_log, int num_entrys, FILE *output);
+void process_slim_logs(s_log_t *slim_log, int num_entries, FILE *output);
+void output_CSV(s_log_t *slim_log, int num_entrie, FILE *output);
 
 // Faster atoi conversion, less err checking overhead
 static inline int
@@ -151,3 +158,9 @@ fast_atol(const char *str)
 	}
 	return val;
 }
+
+
+#ifdef __cplusplus
+}
+#endif
+#endif
