@@ -116,24 +116,32 @@ typedef struct ip_track_s {
 	size_t capacity;
 } ip_track_t;
 
-void process_log(FILE *log, FILE *output);
+// provides context to some of the functions
+typedef struct s_context_s {
+	ip_track_t ip_track;
+	int verbose;
+	int output_filetype_flag;
+} s_context_t;
 
-void parse_log_entry(char *in_log, p_log_t *full_log);
+//// Function Prototypes
+//
+void process_log(FILE *log, FILE *output, s_context_t *context);
+void parse_log_entry(char *in_log, p_log_t *full_log, s_context_t *context);
 
 // Extract Log and Send to Slim
-void extract_log_entry(p_log_t *full_log, s_log_t *slim_log);
+void extract_log_entry(p_log_t *full_log, s_log_t *slim_log, s_context_t *context);
 uint32_t hash_podcast(const char *key);
 uint32_t hash_key(const char *key);
 uint8_t extract_system(const char *device);
 uint8_t extract_platform(const char *user_agent);
 uint8_t extract_location(const char *location);
-uint8_t set_flags(p_log_t *full_log, s_log_t *slim_log);
-int is_unique_ip(uint32_t ip_hash, uint32_t key_hash);
+uint8_t set_flags(p_log_t *full_log, s_log_t *slim_log, s_context_t *context);
+int is_unique_ip(uint32_t ip_hash, uint32_t key_hash, s_context_t *context);
 int check_pattern(const char *check_str, const char *pattern);
 
 // Process Slim Logs
-void process_slim_logs(s_log_t *slim_log, int num_entries, FILE *output);
-void output_CSV(s_log_t *slim_log, int num_entrie, FILE *output);
+void process_slim_logs(s_log_t *slim_log, int num_entries, FILE *output, s_context_t *context);
+void output_CSV(s_log_t *slim_log, int num_entrie, FILE *output, s_context_t *context);
 
 // Faster atoi conversion, less err checking overhead
 static inline int

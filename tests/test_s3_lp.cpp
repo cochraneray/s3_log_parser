@@ -3,7 +3,10 @@ extern "C" {
 #include "../include/s3_lp.h"
 }
 
-TEST(LogParser, DummyTest)
+TEST(log_parser, MatchesStringCorrectly)
 {
-	EXPECT_EQ(1, 1); // placeholder to confirm tests run
+	char *str = "asdvS{pwdjaBlubrrywadjiadw";
+	int result = check_pattern(str, "Blubrry");
+
+	EXPECT_EQ(result, 1);
 }
