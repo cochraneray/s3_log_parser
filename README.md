@@ -103,6 +103,11 @@ make demo
 
 ## Demo & Testing
 
+### Synthetic Test Data
+This tool has been validated against the official [AWS S3 access log format specification](https://docs.aws.amazon.com/AmazonS3/latest/userguide/LogFormat.html) and successfully parses the example logs provided in AWS documentation. 
+The synthetic test data generator creates logs that precisely follow this format specification, exercising all parsing paths including partial downloads, range requests, and various HTTP status codes.
+
+
 ```bash
 # Generate sample data and run complete pipeline
 make demo
