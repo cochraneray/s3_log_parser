@@ -7,6 +7,7 @@ SRC_DIR = src
 INCLUDE_DIR = include
 TEST_DIR = tests
 BIN_DIR = bin
+OUT_DIRS = out out/json out/bin out/tests
 
 # Object files
 MAIN_OBJS = $(BIN_DIR)/s3driver.o $(BIN_DIR)/s3parser.o
@@ -20,8 +21,11 @@ all: s3lp s3_extract fake_logs test_s3lp
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
 
+$(OUT_DIRS):
+	mkdir -p $(OUT_DIRS)
+
 # MAIN PARSER
-s3lp: $(BIN_DIR) $(MAIN_OBJS)
+s3lp: $(BIN_DIR) $(OUT_DIRS) $(MAIN_OBJS)
 	$(CC) $(CCFLAGS) -o s3lp $(MAIN_OBJS) -lc
 
 $(BIN_DIR)/s3driver.o: $(SRC_DIR)/s3driver.c $(INCLUDE_DIR)/s3lp.h | $(BIN_DIR)

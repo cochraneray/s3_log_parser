@@ -146,7 +146,7 @@ void parse_log_entry(char *in_log, p_log_t *full_log, s_context_t *context);
 
 // Extract Log and Send to Slim
 void extract_log_entry(p_log_t *full_log, s_log_t *slim_log, s_context_t *context);
-uint32_t hash_podcast(const char *key);
+uint32_t extract_path(const char *key);
 uint32_t hash_key(const char *key);
 uint8_t extract_system(const char *device);
 uint8_t extract_platform(const char *user_agent);
