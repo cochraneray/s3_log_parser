@@ -1,6 +1,6 @@
 # S3 Log Parser
 
-A high-performance C tool for processing AWS S3 access logs with **95% compression ratio** and lightning-fast analytics capabilities. Built for podcast hosting companies and other S3-heavy applications where log processing performance directly impacts operational costs.
+A high-performance C tool for processing AWS S3 access logs with **87% compression ratio** and lightning-fast analytics capabilities. Built for podcast hosting companies and other S3-heavy applications where log processing performance directly impacts operational costs.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
